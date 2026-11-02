@@ -1,0 +1,10 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.4
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+bcrypt==4.2.1
+PyJWT==2.10.1
+httpx==0.28.1
+reportlab==4.2.5
+openpyxl==3.1.5
