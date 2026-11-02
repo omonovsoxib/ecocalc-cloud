@@ -1,0 +1,47 @@
+# Lokal sinov: docker compose up --build  ->  http://localhost:8080
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ecocalc
+      POSTGRES_PASSWORD: ecocalc
+      POSTGRES_DB: ecocalc
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ecocalc"]
+      interval: 5s
+      retries: 10
+
+  auth-service:
+    build: ./services/auth
+    environment: &dbenv
+      DATABASE_URL: postgresql://ecocalc:ecocalc@db:5432/ecocalc
+      JWT_SECRET: local-dev-secret
+    depends_on: { db: { condition: service_healthy } }
+
+  project-service:
+    build: ./services/project
+    environment:
+      <<: *dbenv
+      CALC_URL: http://calc-service:8000
+    depends_on: { db: { condition: service_healthy } }
+
+  calc-service:
+    build: ./services/calc
+
+  report-service:
+    build: ./services/report
+    environment:
+      PROJECT_URL: http://project-service:8000
+
+  frontend:
+    build: ./frontend
+
+  gateway:
+    image: nginx:1.27-alpine
+    volumes: [./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro]
+    ports: ["8080:80"]
+    depends_on: [auth-service, project-service, calc-service, report-service, frontend]
+
+volumes:
+  pgdata:
