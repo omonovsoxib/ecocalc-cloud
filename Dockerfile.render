@@ -1,0 +1,20 @@
+# Render.com bepul tarifi uchun: 4 ta mikroservis + frontend bitta konteynerda,
+# har biri alohida jarayon (supervisord), Nginx esa ularga yo'naltiradi.
+FROM python:3.12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends nginx supervisor gettext-base \
+    && rm -rf /var/lib/apt/lists/* && rm -f /etc/nginx/sites-enabled/default
+WORKDIR /app
+COPY deploy/render/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+COPY services/auth/main.py    /app/auth/main.py
+COPY services/project/main.py /app/project/main.py
+COPY services/calc/main.py    /app/calc/main.py
+COPY services/report/main.py  /app/report/main.py
+COPY frontend/index.html      /usr/share/nginx/html/index.html
+COPY deploy/render/nginx.conf.template /etc/nginx/templates/ecocalc.conf.template
+COPY deploy/render/supervisord.conf    /etc/supervisor/supervisord.conf
+COPY deploy/render/start.sh /start.sh
+RUN chmod +x /start.sh
+ENV PYTHONUNBUFFERED=1
+EXPOSE 10000
+CMD ["/start.sh"]
