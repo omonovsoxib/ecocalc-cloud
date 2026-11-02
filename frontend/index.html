@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EcoCalc Cloud</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2433; --muted:#667085; --accent:#2563eb; --ok:#16a34a; --bad:#dc2626; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:var(--accent); color:#fff; padding:14px 24px; display:flex; justify-content:space-between; align-items:center; }
+  main { max-width:1000px; margin:24px auto; padding:0 16px; display:grid; gap:16px; }
+  .card { background:var(--card); border-radius:10px; padding:20px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input, textarea { width:100%; padding:8px 10px; border:1px solid #d0d5dd; border-radius:6px; font:inherit; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:9px 16px; font:inherit; cursor:pointer; margin-top:12px; }
+  button.ghost { background:none; color:var(--accent); border:1px solid var(--accent); }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap:12px; }
+  .metric { background:var(--bg); border-radius:8px; padding:12px; }
+  .metric b { display:block; font-size:22px; margin-top:4px; }
+  table { width:100%; border-collapse:collapse; } td, th { padding:8px; border-bottom:1px solid #eaecf0; text-align:left; }
+  .hidden { display:none; } .err { color:var(--bad); }
+</style>
+</head>
+<body>
+<header><strong>EcoCalc Cloud</strong><span id="who"></span></header>
+<main>
+  <section class="card" id="authBox">
+    <h2>Kirish / Ro'yxatdan o'tish</h2>
+    <label>To'liq ism (faqat ro'yxatdan o'tishda)</label><input id="name">
+    <label>Email</label><input id="email" type="email">
+    <label>Parol</label><input id="pass" type="password">
+    <button onclick="auth('login')">Kirish</button>
+    <button class="ghost" onclick="auth('register')">Ro'yxatdan o'tish</button>
+    <p id="authErr" class="err"></p>
+  </section>
+
+  <section class="card hidden" id="formBox">
+    <h2>Yangi loyiha</h2>
+    <label>Loyiha nomi</label><input id="pname" value="Mobil ilova loyihasi">
+    <div class="grid">
+      <div><label>Investitsiya (so'm)</label><input id="inv" type="number" value="100000000"></div>
+      <div><label>Diskont stavkasi (%)</label><input id="rate" type="number" value="15"></div>
+    </div>
+    <label>Yillik daromadlar (vergul bilan)</label><input id="rev" value="40000000, 55000000, 70000000, 80000000">
+    <label>Yillik xarajatlar (vergul bilan)</label><input id="cost" value="10000000, 12000000, 15000000, 15000000">
+    <button onclick="saveProject()">Saqlash va hisoblash</button>
+    <p id="formErr" class="err"></p>
+  </section>
+
+  <section class="card hidden" id="resultBox">
+    <h2 id="rTitle"></h2>
+    <div class="grid" id="metrics"></div>
+    <p id="verdict"></p>
+    <canvas id="chart" height="110"></canvas>
+    <button class="ghost" onclick="download('pdf')">PDF hisobot</button>
+    <button class="ghost" onclick="download('xlsx')">Excel hisobot</button>
+  </section>
+
+  <section class="card hidden" id="listBox">
+    <h2>Mening loyihalarim</h2>
+    <table><thead><tr><th>Nomi</th><th>Investitsiya</th><th></th></tr></thead><tbody id="list"></tbody></table>
+  </section>
+</main>
+<script>
+let token = sessionStorage.getItem('t') || '', current = null, chart = null;
+const $ = id => document.getElementById(id);
+const api = async (path, opts = {}) => {
+  const r = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) } });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  return r.status === 204 ? null : r.json();
+};
+const nums = s => s.split(',').map(x => parseFloat(x.trim())).filter(x => !isNaN(x));
+const fmt = n => n == null ? '-' : Number(n).toLocaleString('uz-UZ', { maximumFractionDigits: 2 });
+
+async function auth(kind) {
+  $('authErr').textContent = '';
+  try {
+    const body = { email: $('email').value, password: $('pass').value };
+    if (kind === 'register') body.full_name = $('name').value;
+    token = (await api('/api/auth/' + kind, { method: 'POST', body: JSON.stringify(body) })).access_token;
+    try { sessionStorage.setItem('t', token); } catch (e) {}
+    start();
+  } catch (e) { $('authErr').textContent = e.message; }
+}
+async function start() {
+  try { const me = await api('/api/auth/me'); $('who').textContent = me.name; } catch (e) { token = ''; return; }
+  ['formBox', 'listBox'].forEach(id => $(id).classList.remove('hidden'));
+  $('authBox').classList.add('hidden');
+  loadList();
+}
+async function loadList() {
+  const rows = await api('/api/projects');
+  $('list').innerHTML = rows.map(p => `<tr><td>${p.name}</td><td>${fmt(p.investment)}</td><td><button class="ghost" onclick="show(${p.id})">Ko'rish</button></td></tr>`).join('');
+}
+async function saveProject() {
+  $('formErr').textContent = '';
+  try {
+    const p = await api('/api/projects', { method: 'POST', body: JSON.stringify({
+      name: $('pname').value, investment: +$('inv').value, rate: +$('rate').value / 100,
+      revenues: nums($('rev').value), costs: nums($('cost').value) }) });
+    await show(p.id); loadList();
+  } catch (e) { $('formErr').textContent = e.message; }
+}
+async function show(id) {
+  const { project, result } = await api(`/api/projects/${id}/evaluate`);
+  current = id;
+  $('resultBox').classList.remove('hidden');
+  $('rTitle').textContent = project.name;
+  const m = [['NPV', fmt(result.npv)], ['IRR', result.irr == null ? '-' : (result.irr * 100).toFixed(2) + ' %'],
+             ['ROI', result.roi + ' %'], ['PP', result.pp ? result.pp + ' yil' : '-'],
+             ['DPP', result.dpp ? result.dpp + ' yil' : '-'], ['PI', result.pi]];
+  $('metrics').innerHTML = m.map(([k, v]) => `<div class="metric">${k}<b>${v}</b></div>`).join('');
+  $('verdict').innerHTML = `<b style="color:${result.npv > 0 ? 'var(--ok)' : 'var(--bad)'}">${result.verdict}</b>`;
+  const labels = project.cash_flows.map((_, i) => (i + 1) + '-yil');
+  if (chart) chart.destroy();
+  chart = new Chart($('chart'), { type: 'bar', data: { labels, datasets: [
+    { label: 'Pul oqimi', data: project.cash_flows, backgroundColor: '#93c5fd' },
+    { label: 'Diskontlangan', data: result.discounted_flows, backgroundColor: '#2563eb' }] } });
+}
+async function download(kind) {
+  const r = await fetch(`/api/reports/${current}.${kind}`, { headers: { Authorization: 'Bearer ' + token } });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(await r.blob()); a.download = `loyiha-${current}.${kind}`; a.click();
+}
+if (token) start();
+</script>
+</body>
+</html>
